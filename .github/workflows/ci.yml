@@ -48,17 +48,49 @@ jobs:
       # deliberately offline. Each file is its own step, because a single
       # `node --test tests/*.test.mjs` collapses four files into one exit code,
       # which is how a cross-platform failure becomes an unactionable log line.
+      #
+      # Output is captured to a file and re-printed with `if: always()`, so a
+      # failure's full stack trace reaches the run log instead of being truncated
+      # by the UI. `tee` keeps the step's own exit status meaningful.
       - name: core.test.mjs
-        run: node --test tests/core.test.mjs
+        run: node --test --test-reporter=spec tests/core.test.mjs 2>&1 | tee ci-report/core.log
 
       - name: apply.test.mjs
-        run: node --test tests/apply.test.mjs
+        run: node --test --test-reporter=spec tests/apply.test.mjs 2>&1 | tee ci-report/apply.log
 
       - name: cli.test.mjs
-        run: node --test tests/cli.test.mjs
+        run: node --test --test-reporter=spec tests/cli.test.mjs 2>&1 | tee ci-report/cli.log
 
       - name: host.test.mjs
-        run: node --test tests/host.test.mjs
+        run: node --test --test-reporter=spec tests/host.test.mjs 2>&1 | tee ci-report/host.log
+
+      - name: Print captured test output
+        if: always()
+        continue-on-error: true
+        shell: bash
+        run: |
+          for f in ci-report/core.log ci-report/apply.log ci-report/cli.log ci-report/host.log; do
+            [ -e "$f" ] || continue
+            echo "=================== $f — HEAD (60 lines, the stack lives here) ==================="
+            head -n 60 "$f"
+            echo "=================== $f — TAIL (40 lines) ==================="
+            tail -n 40 "$f"
+          done
+
+      - name: Diagnose runner environment
+        if: always()
+        continue-on-error: true
+        shell: bash
+        run: |
+          echo "--- node ---"
+          node --version
+          node -e "console.log(process.platform, process.arch, process.execPath)"
+          echo "--- test runner on a trivial file ---"
+          printf "import test from 'node:test'\nimport assert from 'node:assert'\ntest('trivial', () => assert.equal(1,1))\n" > ci-report/trivial.test.mjs
+          node --test --test-reporter=spec ci-report/trivial.test.mjs 2>&1 | tail -n 20
+          echo "trivial exit: $?"
+          echo "--- can the runner load a project file by path? ---"
+          node --test --test-reporter=spec tests/host.test.mjs 2>&1 | head -n 15
 
       - name: Check the release artifact
         run: node scripts/check-pack.mjs
