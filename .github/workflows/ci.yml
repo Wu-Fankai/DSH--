@@ -45,24 +45,30 @@ jobs:
           } > "ci-report/${{ matrix.os }}-${{ matrix.node }}.txt" 2>&1
 
       # No install step: the package has no dependencies and the suite is
-      # deliberately offline. Each file is its own step, because a single
-      # `node --test tests/*.test.mjs` collapses four files into one exit code,
-      # which is how a cross-platform failure becomes an unactionable log line.
+      # deliberately offline.
       #
-      # Output is captured to a file and re-printed with `if: always()`, so a
-      # failure's full stack trace reaches the run log instead of being truncated
-      # by the UI. `tee` keeps the step's own exit status meaningful.
+      # The files are run directly rather than through `node --test`. The
+      # runner loads each file in a worker, and on the Linux and macOS runners
+      # that step failed with MODULE_NOT_FOUND and an empty requireStack from
+      # executeUserEntryPoint — the loader failing to run the file as an entry
+      # point, not a failing assertion. The files import `node:test`
+      # themselves, so a direct run still reports TAP and still exits non-zero
+      # on failure; it just skips the extra process boundary.
+      #
+      # Each file is its own step so a failure names the file, and output is
+      # captured and reprinted head and tail with `if: always()` so the stack
+      # reaches the log instead of being truncated by the UI.
       - name: core.test.mjs
-        run: node --test --test-reporter=spec tests/core.test.mjs 2>&1 | tee ci-report/core.log
+        run: node tests/core.test.mjs 2>&1 | tee ci-report/core.log
 
       - name: apply.test.mjs
-        run: node --test --test-reporter=spec tests/apply.test.mjs 2>&1 | tee ci-report/apply.log
+        run: node tests/apply.test.mjs 2>&1 | tee ci-report/apply.log
 
       - name: cli.test.mjs
-        run: node --test --test-reporter=spec tests/cli.test.mjs 2>&1 | tee ci-report/cli.log
+        run: node tests/cli.test.mjs 2>&1 | tee ci-report/cli.log
 
       - name: host.test.mjs
-        run: node --test --test-reporter=spec tests/host.test.mjs 2>&1 | tee ci-report/host.log
+        run: node tests/host.test.mjs 2>&1 | tee ci-report/host.log
 
       - name: Print captured test output
         if: always()
@@ -76,21 +82,6 @@ jobs:
             echo "=================== $f — TAIL (40 lines) ==================="
             tail -n 40 "$f"
           done
-
-      - name: Diagnose runner environment
-        if: always()
-        continue-on-error: true
-        shell: bash
-        run: |
-          echo "--- node ---"
-          node --version
-          node -e "console.log(process.platform, process.arch, process.execPath)"
-          echo "--- test runner on a trivial file ---"
-          printf "import test from 'node:test'\nimport assert from 'node:assert'\ntest('trivial', () => assert.equal(1,1))\n" > ci-report/trivial.test.mjs
-          node --test --test-reporter=spec ci-report/trivial.test.mjs 2>&1 | tail -n 20
-          echo "trivial exit: $?"
-          echo "--- can the runner load a project file by path? ---"
-          node --test --test-reporter=spec tests/host.test.mjs 2>&1 | head -n 15
 
       - name: Check the release artifact
         run: node scripts/check-pack.mjs
