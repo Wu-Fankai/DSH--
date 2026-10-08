@@ -1,0 +1,6 @@
+{
+  "//": "Copy this file to .release-target.json and fill it in before publishing. `npm run release:stamp` writes these values into package.json; `npm run pack:check` requires them to be real.",
+  "repositoryUrl": "https://github.com/<owner>/dsh-plugin-profile-sync",
+  "bugsUrl": "https://github.com/<owner>/dsh-plugin-profile-sync/issues",
+  "homepage": "https://github.com/<owner>/dsh-plugin-profile-sync#readme"
+}

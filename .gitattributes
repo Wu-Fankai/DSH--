@@ -1,0 +1,18 @@
+# Normalize every text file to LF in the repository, whatever the working
+# copy uses. The package ships a Node bin with a shebang and a CI workflow that
+# runs on three platforms; a CRLF shebang breaks execution on POSIX, so the
+# stored form is pinned here instead of left to each contributor's autocrlf.
+* text=auto eol=lf
+
+# Windows command scripts are the one exception: cmd.exe expects CRLF.
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+# Binary artifacts must never be text-normalized.
+*.png binary
+*.ico binary
+*.tgz binary
+
+# Keep diffs readable for generated metadata.
+package-lock.json -diff linguist-generated
+pnpm-lock.yaml -diff linguist-generated

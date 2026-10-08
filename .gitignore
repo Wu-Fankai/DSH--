@@ -1,0 +1,16 @@
+# Release target is operator-specific and must never be committed.
+.release-target.json
+
+# Packed release artifacts are produced by `npm run pack:check`.
+*.tgz
+
+# Local state produced by the tool itself.
+*.profilesync.lock
+*.profilesync.bak
+*.profilesync.*.tmp
+*.profilesync.displaced
+
+node_modules/
+npm-debug.log*
+.DS_Store
+Thumbs.db

@@ -1,0 +1,7 @@
+# dsh bundle patch: inserts this plugin into a profile's layer stack.
+#
+# The row id is the settings namespace DSH uses for this plugin's `config`,
+# which is why it is spelled out rather than left to the package name.
+- insert:
+    - id: dsh-plugin-profile-sync
+      name: 'dsh-plugin-profile-sync'

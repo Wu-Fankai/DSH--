@@ -1,0 +1,52 @@
+name: ci
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: node ${{ matrix.node }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # The engines range is `^22.19.0 || >=24.0.0`, so both ends are covered,
+        # and Windows is included because the package-manager resolution and the
+        # command-script spawn path only execute there.
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        node: ['22.19.0', '24.x']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      # No install step: the package has no dependencies, and the suite is
+      # deliberately offline.
+      - name: Test
+        run: node --test tests/*.test.mjs
+
+      - name: Check the release artifact
+        run: node scripts/check-pack.mjs
+
+  artifact:
+    name: packed artifact installs
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.x'
+      # The tarball is produced and unpacked by the package's own scripts, so
+      # this job needs no npm install and no network.
+      - name: Pack and verify
+        run: |
+          node scripts/check-pack.mjs
+          node scripts/check-install.mjs
