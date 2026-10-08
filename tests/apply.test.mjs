@@ -4,7 +4,7 @@
  */
 
 import assert from 'node:assert/strict'
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { delimiter, join } from 'node:path'
 import test from 'node:test'
@@ -181,17 +181,24 @@ test('resolveExecutable prefers a runnable shim over a bare POSIX script', (t) =
   // A package manager installed by npm leaves an extensionless shell script, a
   // `.cmd` shim, and a `.ps1` script side by side. Only the `.cmd` (or `.exe`)
   // form can be started without a shell, so the extensionless match must lose.
+  //
+  // The fixtures are given the execute bit explicitly: this test is about which
+  // candidate wins, and on POSIX `writeFileSync` alone produces a 0644 file that
+  // `accessSync(X_OK)` correctly rejects. Leaving that implicit is what made the
+  // first CI run fail on Linux and macOS while passing on Windows, where X_OK is
+  // a no-op.
   const dir = mkdtempSync(join(tmpdir(), 'psync-path-'))
   t.after(() => { rmSync(dir, { recursive: true, force: true }) })
   writeFileSync(join(dir, 'fakepm'), '#!/bin/sh\nexit 0\n')
   writeFileSync(join(dir, 'fakepm.cmd'), '@echo off\r\n')
   writeFileSync(join(dir, 'fakepm.ps1'), 'exit 0\r\n')
+  if (process.platform !== 'win32') chmodSync(join(dir, 'fakepm'), 0o755)
 
   const previousPath = process.env.PATH
   process.env.PATH = dir
   try {
     const resolved = resolveExecutable('fakepm')
-    assert.ok(resolved !== undefined)
+    assert.ok(resolved !== undefined, 'a fixture with the execute bit must resolve')
     if (process.platform === 'win32') {
       assert.equal(resolved.toLowerCase().endsWith('.cmd'), true)
     } else {
@@ -203,6 +210,7 @@ test('resolveExecutable prefers a runnable shim over a bare POSIX script', (t) =
     const nativeDir = mkdtempSync(join(tmpdir(), 'psync-native-'))
     t.after(() => { rmSync(nativeDir, { recursive: true, force: true }) })
     writeFileSync(join(nativeDir, 'fakepm.exe'), 'MZ')
+    if (process.platform !== 'win32') chmodSync(join(nativeDir, 'fakepm.exe'), 0o755)
     process.env.PATH = `${dir}${delimiter}${nativeDir}`
     const preferred = resolveExecutable('fakepm')
     if (process.platform === 'win32') assert.equal(preferred, join(nativeDir, 'fakepm.exe'))
@@ -213,18 +221,45 @@ test('resolveExecutable prefers a runnable shim over a bare POSIX script', (t) =
   }
 })
 
+test('a non-executable file is not mistaken for a command', (t) => {
+  // On POSIX the execute bit is the difference between "a command" and "a file
+  // that happens to be named like one". On Windows the filesystem carries no
+  // such bit, so a plain file is accepted there and only there.
+  const dir = mkdtempSync(join(tmpdir(), 'psync-mode-'))
+  t.after(() => { rmSync(dir, { recursive: true, force: true }) })
+  writeFileSync(join(dir, 'plaincmd'), '#!/bin/sh\nexit 0\n')
+  chmodSync(join(dir, 'plaincmd'), 0o644)
+
+  const previousPath = process.env.PATH
+  process.env.PATH = dir
+  try {
+    const resolved = resolveExecutable('plaincmd')
+    if (process.platform === 'win32') {
+      assert.equal(resolved, join(dir, 'plaincmd'), 'X_OK is a no-op on Windows')
+    } else {
+      assert.equal(resolved, undefined, 'a 0644 file is not runnable on POSIX')
+      chmodSync(join(dir, 'plaincmd'), 0o755)
+      assert.equal(resolveExecutable('plaincmd'), join(dir, 'plaincmd'))
+    }
+  } finally {
+    if (previousPath === undefined) delete process.env.PATH
+    else process.env.PATH = previousPath
+  }
+})
+
 test('pnpm candidates are ordered pnpm then corepack', () => {
   assert.deepEqual(pnpmInvocationCandidates().map(candidate => candidate.label), ['pnpm', 'corepack pnpm'])
 })
 
-test('a real install either succeeds fully or fails loudly, never silently', async (t) => {
+test('a real install either succeeds fully or fails loudly, never silently', { skip: process.env.CI === 'true' ? 'needs a registry; the suite is offline by design' : false }, async (t) => {
   const home = makeHome(t)
   writeProfile(home, 'web', webManifest())
   writeProfile(home, 'desktop', desktopManifest())
   const plan = planSync({ dshHome: home, sources: ['web'], targets: ['desktop'] })
-  // This is the only test that lets the real package manager run. It may fail
-  // on a host without pnpm or without network, so both outcomes are accepted —
-  // but a success that leaves packages missing is not.
+  // This is the only test that lets the real package manager run, so it is
+  // skipped under CI: a runner without pnpm or without registry access would
+  // otherwise turn an environment fact into a red build. Both outcomes are
+  // accepted locally — but a success that leaves packages missing is not.
   const result = await applySync(plan, { backup: false })
   const entry = result.results[0]
   if (entry.status === 'applied') {
