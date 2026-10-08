@@ -10,14 +10,14 @@ permissions:
   contents: read
 
 jobs:
-  test:
-    name: node ${{ matrix.node }} on ${{ matrix.os }}
+  verify:
+    name: ${{ matrix.os }} / node ${{ matrix.node }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        # The engines range is `^22.19.0 || >=24.0.0`, so both ends are covered,
-        # and Windows is included because the package-manager resolution and the
+        # The engines range is `^22.19.0 || >=24.0.0`, so both ends are covered.
+        # Windows is included because the package-manager resolution and the
         # command-script spawn path only execute there.
         os: [ubuntu-latest, windows-latest, macos-latest]
         node: ['22.19.0', '24.x']
@@ -27,26 +27,49 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
 
-      # No install step: the package has no dependencies, and the suite is
-      # deliberately offline.
-      - name: Test
-        run: node --test tests/*.test.mjs
+      # Record the environment before anything can fail, so a platform-specific
+      # failure always arrives with the platform facts attached.
+      - name: Record environment
+        if: always()
+        continue-on-error: true
+        shell: bash
+        run: |
+          mkdir -p ci-report
+          {
+            echo "node     : $(node --version)"
+            echo "platform : $(node -e "process.stdout.write(process.platform + ' ' + process.arch)")"
+            echo "tar      : $(command -v tar || echo MISSING)"
+            echo "gzip     : $(command -v gzip || echo MISSING)"
+            echo "pnpm     : $(command -v pnpm || echo MISSING)"
+            echo "npm      : $(command -v npm || echo MISSING)"
+          } > "ci-report/${{ matrix.os }}-${{ matrix.node }}.txt" 2>&1
+
+      # No install step: the package has no dependencies and the suite is
+      # deliberately offline. Each file is its own step, because a single
+      # `node --test tests/*.test.mjs` collapses four files into one exit code,
+      # which is how a cross-platform failure becomes an unactionable log line.
+      - name: core.test.mjs
+        run: node --test tests/core.test.mjs
+
+      - name: apply.test.mjs
+        run: node --test tests/apply.test.mjs
+
+      - name: cli.test.mjs
+        run: node --test tests/cli.test.mjs
+
+      - name: host.test.mjs
+        run: node --test tests/host.test.mjs
 
       - name: Check the release artifact
         run: node scripts/check-pack.mjs
 
-  artifact:
-    name: packed artifact installs
-    runs-on: ubuntu-latest
-    needs: test
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Prove the packed artifact installs and runs
+        run: node scripts/check-install.mjs
+
+      - uses: actions/upload-artifact@v4
+        if: always()
         with:
-          node-version: '24.x'
-      # The tarball is produced and unpacked by the package's own scripts, so
-      # this job needs no npm install and no network.
-      - name: Pack and verify
-        run: |
-          node scripts/check-pack.mjs
-          node scripts/check-install.mjs
+          name: ci-report-${{ matrix.os }}-${{ matrix.node }}
+          path: ci-report/
+          if-no-files-found: warn
+          retention-days: 7
